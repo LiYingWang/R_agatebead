@@ -1,0 +1,210 @@
+---
+title: "Analysis of agate beads from KWL-I site"
+output: html_document
+---
+
+```{r, setup, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(ggbeeswarm)
+library(jpeg)
+library(plyr)
+opts_chunk$set(warning = FALSE,
+               messages = FALSE,
+               cache = TRUE)
+# prepare images according to https://gist.github.com/benmarwick/6260541
+# in RStudio, set working directory to source file location 
+```
+
+## Introduction
+In this analysis, I examine 271 agate beads from Kiwulan site, which was excavated in 2001.  The total number of agate beads is 783. The samples selected are the beads with clear archaeological context from household area, burials, and midden. Agate beads can be classified to main 8 types according to their shape, size, and texture. Among these types, hexagonal shaped beads is the main category with the total number of 140.  
+
+```{r, echo=FALSE}
+KWL1 <- read_excel("2016_KWL1_agatebead.xlsx")
+```
+
+```{r, echo=FALSE, results='hide'}
+str(KWL1)
+View(KWL1)
+```
+
+```{r, table, include=FALSE}
+count(KWL1, 'Shape')
+```
+
+```{r, echo=FALSE, results='hide'}
+# new column for incomplete measuements indicated by +
+incomplete_in_new_col <- function(the_df, the_col){
+the_col_d <- deparse(substitute(the_col))
+x <- the_df[[the_col_d]]
+  
+# replace existing col with numeric
+x1 <- gsub("\\+|\\-", "", x) 
+the_df[[the_col_d]] <- as.numeric(x1)
+  
+# add new col to indicate incompleteness 
+y <- ifelse(grepl("\\+|\\-", x), 1, 0)
+the_df <- cbind(the_df, y)
+new_name <- paste0("incomplete_", the_col_d)
+names(the_df)[names(the_df) == 'y'] <-  new_name
+
+# return the result, as tbl_df for nice printing
+  return(tbl_df(the_df))
+}
+```
+
+```{r, echo=FALSE, results='hide'}
+# Apply this function to several cols
+KWL1 <- incomplete_in_new_col(KWL1, Length)
+KWL1 <- incomplete_in_new_col(KWL1, Width)
+KWL1 <- incomplete_in_new_col(KWL1, Thick)
+```
+
+```{r, move space, echo=FALSE}
+KWL1$Shape <- gsub(" ", "", KWL1$Shape)
+```
+
+## Analysis
+
+### Size distributions by bead shape
+
+The distribution of length across different shape shows that large oval beads tend to have longer length, while globular ones are usually short. For the perforation, waxy oval beads have largest perforation followed by hexagonal ones. Globular beads tend to have smaller perforation. This indicates some types of bead might have distinct perforation techniques. The byplot of length and width shows there are some variations for most types. But cylinder and large oval beads have relatively uniformed size.   
+
+```{r, echo=FALSE}
+ggplot(KWL1,
+       aes(reorder(Shape, -Length),
+           Length)) +
+  geom_boxplot() +
+  geom_quasirandom() +
+  theme_minimal()
+```
+
+```{r, echo=FALSE}
+KWL1$Ave_per=as.numeric(KWL1$Ave_per)
+ggplot(KWL1,
+       aes(reorder(Shape, -Ave_per),
+           Ave_per)) +
+  geom_boxplot() +
+  geom_quasirandom() +
+  theme_minimal()
+```
+
+```{r, echo=FALSE}
+KWL1_LW_hulls <- 
+KWL1 %>% 
+  filter(!is.na(Length), !is.na(Width)) %>% 
+  nest(-Shape) %>% 
+  mutate(hulls = map(data, ~.[chull(.$Length, .$Width),])) %>% 
+  select(Shape, hulls) %>% 
+  unnest(hulls)
+
+ggplot(KWL1,
+       aes(Length,
+           Width, 
+           colour = Shape,
+           fill = Shape)) +
+  geom_point() +
+  geom_polygon(data = KWL1_LW_hulls, 
+               alpha = 0.1, 
+               color  = NA) +
+  theme_minimal()
+```
+
+### Image of bead shape
+
+For the bead image analysis, I only select beads from burial context, since the beads used as grave goods are relatively complete. The PCA analysis shows that over 90 percent of beads can be explained by three components. The first one is the variation of width, and the second and the third one show the shape from oval to rectangular. The k-mean analysis shows beads can be divided into three groups based on their shape, including rectangular, oval, and relatively globular. 
+
+```{r, read, echo=FALSE, results='hide'}
+image_dir <- paste0(getwd(), "/KWL1_agatebeads_b_image")
+image_file_names <- list.files(image_dir, 
+                               full.names = TRUE)
+```
+
+```{r, get invert, echo=FALSE, include=FALSE}
+# get only the crop_threshold_invert images 
+prepared_images <- 
+  image_file_names[(grepl("crop_threshold_invert", image_file_names))]
+
+not_prepared_images <- image_file_names[!image_file_names %in% prepared_images]
+not_prepared_images <- not_prepared_images[grepl(".JPG", not_prepared_images)]
+```  
+
+```{r, echo=FALSE, results='hide', include=FALSE}
+library(Momocs) 
+```
+
+```{r, echo=FALSE, results='hide', include=FALSE}
+# get outlines from images, may take a minute or two 
+prepared_images_outlines <- 
+ Out(import_jpg(prepared_images))
+```
+
+```{r, echo=FALSE, results='hide', include=FALSE}
+# check to see how it works
+panel(prepared_images_outlines,
+      names = gsub(image_dir, "", prepared_images), 
+      cex.names = 0.8)
+
+stack(prepared_images_outlines)
+
+coo_oscillo(prepared_images_outlines[1], "efourier")
+```
+ 
+```{r, echo=FALSE, results='hide', include=FALSE}
+#  determine how many harmonics to use in the elliptical fourier    analysis (quite time consuming)
+calibrate_harmonicpower(prepared_images_outlines, nb.h = 20)
+calibrate_reconstructions(prepared_images_outlines)
+```
+
+
+```{r, echo=FALSE, results='hide', include=FALSE}
+# compute elliptical fourier analysis with the n of harmonics that does 99%
+prepared_images_outlines_e <- 
+  efourier(prepared_images_outlines, 9, norm=TRUE)
+```
+
+#### PCA
+```{r, echo=FALSE}
+prepared_images_outlines_e_pca <- 
+  PCA(prepared_images_outlines_e)
+
+plot(prepared_images_outlines_e_pca,
+     labelspoints = TRUE)
+
+scree_plot(prepared_images_outlines_e_pca)
+
+PCcontrib(prepared_images_outlines_e_pca)
+```
+
+#### k means
+```{r, echo=FALSE}
+k_means_df <- 
+KMEANS(prepared_images_outlines_e_pca, centers = 3)
+
+artefact_groups <- 
+  data_frame(artefact = names(k_means_df$cluster),
+           group = k_means_df$cluster)
+
+prepared_images_outlines$fac <- 
+  data.frame(group = as.factor(artefact_groups$group))
+```
+
+
+```{r, echo=FALSE}
+prepared_images_outlines %>% 
+  efourier(., 9, norm=TRUE) %>% 
+  PCA(.) %>% 
+  plot(., labelspoints = TRUE, 
+       cex = 0.4,
+      "group")
+
+prepared_images_outlines %>% 
+  efourier(., 9, norm=TRUE) %>% 
+  PCA(.) %>% 
+  plot(., labelspoints = TRUE, 
+       chull=TRUE, 
+       abbreviate.labelsgroups = TRUE, 
+       points=FALSE,
+       "group")
+```
